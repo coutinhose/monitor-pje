@@ -1,10 +1,12 @@
 import requests
 from bs4 import BeautifulSoup
 import telegram
+from telegram.ext import ApplicationBuilder, MessageHandler, filters
 import asyncio
 import schedule
 import time
 import os
+import threading
 from datetime import datetime
 
 TOKEN = os.environ.get("TELEGRAM_TOKEN")
@@ -60,17 +62,39 @@ def consulta_obrigatoria():
 def consulta_mudanca():
     verificar_e_notificar(obrigatorio=False)
 
+async def responder_mensagem(update, context):
+    texto = update.message.text.strip().lower()
+    if texto == "consulte":
+        dados = consultar_processo()
+        agora = datetime.now().strftime("%d/%m/%Y %H:%M")
+        msg = f"🔍 Consulta sob demanda — {agora}\n\n"
+        msg += "\n".join(dados)
+        await update.message.reply_text(msg)
+
+def rodar_schedule():
+    while True:
+        schedule.run_pending()
+        time.sleep(60)
+
 schedule.every().day.at("08:00").do(consulta_obrigatoria)
 schedule.every().day.at("12:00").do(consulta_obrigatoria)
 schedule.every().day.at("14:00").do(consulta_obrigatoria)
 schedule.every().day.at("18:00").do(consulta_obrigatoria)
 schedule.every().day.at("19:00").do(consulta_obrigatoria)
-
 schedule.every(30).minutes.do(consulta_mudanca)
 
-print("Monitor iniciado...")
-asyncio.run(enviar_mensagem("✅ Monitor PJe iniciado com sucesso!"))
+thread = threading.Thread(target=rodar_schedule, daemon=True)
+thread.start()
 
-while True:
-    schedule.run_pending()
-    time.sleep(60)
+print("Monitor iniciado...")
+
+app = ApplicationBuilder().token(TOKEN).build()
+app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, responder_mensagem))
+
+async def iniciar():
+    await enviar_mensagem("✅ Monitor PJe iniciado com sucesso!")
+
+asyncio.get_event_loop().run_until_complete(iniciar())
+
+print("Aguardando mensagens...")
+app.run_polling()
